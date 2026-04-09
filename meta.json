@@ -1,0 +1,17 @@
+{
+  "module_id": "simone-kalmakis:baby-monitor",
+  "visibility": "private",
+  "url": "",
+  "description": "Baby monitor awake detection module",
+  "models": [
+    {
+      "api": "rdk:service:vision",
+      "model": "simone-kalmakis:baby-monitor:awake-classifier"
+    },
+    {
+      "api": "rdk:service:vision",
+      "model": "simone-kalmakis:baby-monitor:mock-eye-classifier"
+    }
+  ],
+  "entrypoint": "./bin/baby-monitor"
+}
