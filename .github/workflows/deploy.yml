@@ -1,0 +1,34 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: make build
+
+      - name: Package
+        run: tar -czf module.tar.gz meta.json bin/baby-monitor
+
+      - name: Upload to Viam registry
+        run: |
+          curl -fsSL https://storage.googleapis.com/packages.viam.com/apps/viam-cli/viam-cli-stable-linux-arm64 \
+            -o /usr/local/bin/viam
+          chmod +x /usr/local/bin/viam
+          viam module upload \
+            --api-key-id=${{ secrets.VIAM_API_KEY_ID }} \
+            --api-key=${{ secrets.VIAM_API_KEY }} \
+            --module=meta.json \
+            --platform=linux/arm64 \
+            --version=0.0.${{ github.run_number }} \
+            module.tar.gz
