@@ -1,7 +1,7 @@
 {
   "module_id": "simone-kalmakis:baby-monitor",
   "visibility": "private",
-  "url": "",
+  "url": "https://github.com/Simberific/baby-monitor-vision",
   "description": "Baby monitor awake detection module",
   "models": [
     {
