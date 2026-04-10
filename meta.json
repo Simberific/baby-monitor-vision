@@ -13,5 +13,10 @@
       "model": "simone-kalmakis:baby-monitor:mock-eye-classifier"
     }
   ],
-  "entrypoint": "./bin/baby-monitor"
+  "entrypoint": "./bin/baby-monitor",
+  "build": {
+    "build": "make module.tar.gz",
+    "path": "module.tar.gz",
+    "arch": ["linux/arm64", "darwin/arm64", "darwin/amd64"]
+  }
 }
