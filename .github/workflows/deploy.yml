@@ -24,6 +24,7 @@ jobs:
             -o /usr/local/bin/viam
           chmod +x /usr/local/bin/viam
           viam login api-key --key-id="$VIAM_KEY_ID" --key="$VIAM_KEY"
+          viam module update --module=meta.json
           viam module build start \
             --module=meta.json \
             --version=0.0.${{ github.run_number }} \
