@@ -2,88 +2,42 @@ package babymonitor
 
 import (
 	"context"
-	"image"
-	"image/draw"
 	"strings"
 
-	"github.com/pkg/errors"
+	"go.viam.com/rdk/components/sensor"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/services/vision"
-	"go.viam.com/rdk/vision/classification"
 )
 
-// cropImage returns a copy of img restricted to rect, using SubImage when available.
-// Copied verbatim from fish-predictor/bbox_helpers.go.
-func cropImage(img image.Image, rect image.Rectangle) image.Image {
-	type subImager interface {
-		SubImage(r image.Rectangle) image.Image
-	}
-	if sub, ok := img.(subImager); ok {
-		return sub.SubImage(rect)
-	}
-	dst := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
-	draw.Draw(dst, dst.Bounds(), img, rect.Min, draw.Src)
-	return dst
-}
-
-// runPipeline executes the full detection pipeline for a single frame and returns
-// a single "awake" classification whose confidence encodes awake probability.
+// runPipeline reads from all three input resources and returns whether the baby is awake.
 func runPipeline(
 	ctx context.Context,
-	img image.Image,
 	camName string,
-	eyeDetector, eyeClassifier, motionDetector vision.Service,
+	eyeDetector, motionDetector vision.Service,
+	audioSensor sensor.Sensor,
 	minEyeConf float64,
 	logger logging.Logger,
-) (classification.Classifications, error) {
-	// Step 1: Eye detection — find the highest-confidence "eyes" bounding box.
-	detections, err := eyeDetector.Detections(ctx, img, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "eye detection failed")
-	}
-
+) (bool, error) {
+	// Step 1: Eye signal — any eyes detected above threshold means the baby is visible.
 	eyesDetected := false
 	eyeConfidence := 0.0
-	var bestEyeBB *image.Rectangle
-
-	for _, det := range detections {
-		if !strings.EqualFold(det.Label(), "eyes") {
-			continue
-		}
-		score := float64(det.Score())
-		if score < minEyeConf {
-			continue
-		}
-		if score > eyeConfidence {
-			eyeConfidence = score
-			bb := det.BoundingBox()
-			bestEyeBB = bb
-			eyesDetected = true
-		}
-	}
-
-	// Step 2+3: Crop to eye bbox, classify open/closed.
-	eyesOpen := false
-	if eyesDetected && bestEyeBB != nil {
-		// Clamp to image bounds before cropping.
-		clampedBB := bestEyeBB.Intersect(img.Bounds())
-		if !clampedBB.Empty() {
-			croppedImg := cropImage(img, clampedBB)
-			cls, classifyErr := eyeClassifier.Classifications(ctx, croppedImg, 5, nil)
-			if classifyErr != nil {
-				logger.Warnw("eye classifier error", "error", classifyErr)
-			} else {
-				for _, c := range cls {
-					if strings.EqualFold(c.Label(), "open") {
-						eyesOpen = true
-						break
-					}
-				}
+	detections, detErr := eyeDetector.DetectionsFromCamera(ctx, camName, nil)
+	if detErr != nil {
+		logger.Warnw("eye detector error", "error", detErr)
+	} else {
+		for _, det := range detections {
+			if !strings.EqualFold(det.Label(), "eyes") {
+				continue
+			}
+			score := float64(det.Score())
+			if score >= minEyeConf && score > eyeConfidence {
+				eyeConfidence = score
+				eyesDetected = true
 			}
 		}
 	}
 
-	// Step 4: Motion signal — fraction of pixels that moved.
+	// Step 2: Motion signal.
 	motionConfidence := 0.0
 	motionCls, motionErr := motionDetector.ClassificationsFromCamera(ctx, camName, 1, nil)
 	if motionErr != nil {
@@ -97,33 +51,38 @@ func runPipeline(
 		}
 	}
 
-	// Step 5: Fuse all signals into a single confidence score.
-	awakeConf := fuseSignals(eyesDetected, eyesOpen, eyeConfidence, motionConfidence)
+	// Step 3: Audio signal — expects a "sound_level" key in [0,1] from the sensor.
+	audioLevel := 0.0
+	audioReadings, audioErr := audioSensor.Readings(ctx, nil)
+	if audioErr != nil {
+		logger.Warnw("audio sensor error", "error", audioErr)
+	} else {
+		if v, ok := audioReadings["sound_level"]; ok {
+			if f, ok := v.(float64); ok {
+				audioLevel = f
+			}
+		}
+	}
 
-	// Step 6: Always emit label "awake"; confidence encodes the probability.
-	// Consumers apply their own threshold to determine awake/asleep state.
-	return classification.Classifications{
-		classification.NewClassification(awakeConf, "awake"),
-	}, nil
+	// Step 4: Fuse all three signals.
+	return fuseSignals(eyesDetected, eyeConfidence, motionConfidence, audioLevel), nil
 }
 
-// fuseSignals combines three signals into a single awake confidence score in [0,1].
+// fuseSignals combines eye, motion, and audio signals into an awake confidence in [0,1].
 // Parameters:
-//   - eyesDetected:     whether any eyes were found with sufficient confidence
-//   - eyesOpen:         whether the detected eyes are classified as open
-//   - eyeConfidence:    confidence of the eye detection (0 if none detected)
+//   - eyesDetected:     whether any eyes were found above minEyeConf
+//   - eyeConfidence:    detection confidence of the best eye bounding box (0 if none)
 //   - motionConfidence: fraction of pixels that moved (from viam/motion-detector)
+//   - audioLevel:       normalised sound level in [0,1] (from audio-sensor)
 //
-// TODO: Refine fusion logic. Consider trade-offs:
-//   - How much should motion alone contribute when eyes aren't visible?
-//   - Should eyes-closed + high motion → still count as awake?
-//   - What weight ratio between eye state and motion signal feels right?
-func fuseSignals(eyesDetected, eyesOpen bool, eyeConfidence, motionConfidence float64) float64 {
-	if !eyesDetected {
-		return motionConfidence
+// Eyes and audio are hard awake signals — either alone is sufficient.
+// Motion is intentionally left as a weak signal pending real-world tuning.
+func fuseSignals(eyesDetected bool, eyeConfidence, motionConfidence, audioLevel float64) bool {
+	if eyesDetected {
+		return true
 	}
-	if eyesOpen {
-		return eyeConfidence*0.9 + motionConfidence*0.1
+	if audioLevel > 0.2 {
+		return true
 	}
-	return motionConfidence * 0.5
+	return motionConfidence+audioLevel > 0.2
 }
