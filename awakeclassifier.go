@@ -141,12 +141,12 @@ func (s *awakeClassifier) runLoop(ctx context.Context) error {
 }
 
 func (s *awakeClassifier) runOnce(ctx context.Context) error {
-	isAwake, err := runPipeline(ctx, s.camName, s.eyeDetector, s.motionDetector, s.audioSensor, s.minEyeConfidence, s.logger)
+	isAwake, eyesDetected, motionConfidence, soundDetected, err := runPipeline(ctx, s.camName, s.eyeDetector, s.motionDetector, s.audioSensor, s.minEyeConfidence, s.logger)
 	if err != nil {
 		s.logger.Warnw("pipeline error", "error", err)
 		return nil
 	}
-	s.results.Store(isAwake)
+	s.results.Store(isAwake, eyesDetected, motionConfidence, soundDetected)
 	return nil
 }
 
@@ -154,11 +154,15 @@ func (s *awakeClassifier) Name() resource.Name {
 	return s.name
 }
 
-// Readings returns the latest fused awake/asleep determination.
-// Output keys: "is_awake" (bool).
+// Readings returns the latest fused awake/asleep determination and raw sensor values.
+// Output keys: "is_awake" (bool), "eyes_detected" (bool), "motion_confidence" (float64), "sound_detected" (bool).
 func (s *awakeClassifier) Readings(ctx context.Context, extra map[string]interface{}) (map[string]interface{}, error) {
+	isAwake, eyesDetected, motionConfidence, soundDetected := s.results.Load()
 	return map[string]interface{}{
-		"is_awake": s.results.Load(),
+		"is_awake":          isAwake,
+		"eyes_detected":     eyesDetected,
+		"motion_confidence": motionConfidence,
+		"sound_detected":    soundDetected,
 	}, nil
 }
 
@@ -169,8 +173,12 @@ func (s *awakeClassifier) DoCommand(ctx context.Context, cmd map[string]interfac
 	}
 	switch command {
 	case "get_last_result":
+		isAwake, eyesDetected, motionConfidence, soundDetected := s.results.Load()
 		return map[string]interface{}{
-			"is_awake": s.results.Load(),
+			"is_awake":          isAwake,
+			"eyes_detected":     eyesDetected,
+			"motion_confidence": motionConfidence,
+			"sound_detected":    soundDetected,
 		}, nil
 	default:
 		return nil, errors.Errorf("unknown command: %s", command)
