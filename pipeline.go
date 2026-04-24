@@ -78,5 +78,5 @@ func fuseSignals(eyesDetected bool, eyeConfidence, motionConfidence float64, aud
 	if audioDetected {
 		return true
 	}
-	return motionConfidence > 0.2
+	return motionConfidence > 0.1
 }
