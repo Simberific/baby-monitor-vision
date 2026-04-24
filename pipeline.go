@@ -9,7 +9,8 @@ import (
 	"go.viam.com/rdk/services/vision"
 )
 
-// runPipeline reads from all three input resources and returns whether the baby is awake.
+// runPipeline reads from all three input resources and returns the awake determination
+// along with the raw sensor values that produced it.
 func runPipeline(
 	ctx context.Context,
 	camName string,
@@ -17,9 +18,8 @@ func runPipeline(
 	audioSensor sensor.Sensor,
 	minEyeConf float64,
 	logger logging.Logger,
-) (bool, error) {
+) (isAwake, eyesDetected bool, motionConfidence float64, soundDetected bool, err error) {
 	// Step 1: Eye signal — any eyes detected above threshold means the baby is visible.
-	eyesDetected := false
 	eyeConfidence := 0.0
 	detections, detErr := eyeDetector.DetectionsFromCamera(ctx, camName, nil)
 	if detErr != nil {
@@ -38,7 +38,6 @@ func runPipeline(
 	}
 
 	// Step 2: Motion signal.
-	motionConfidence := 0.0
 	motionCls, motionErr := motionDetector.ClassificationsFromCamera(ctx, camName, 1, nil)
 	if motionErr != nil {
 		logger.Warnw("motion detector error", "error", motionErr)
@@ -52,20 +51,19 @@ func runPipeline(
 	}
 
 	// Step 3: Audio signal — expects a "sound_detected" bool key from the sensor.
-	audioDetected := false
 	audioReadings, audioErr := audioSensor.Readings(ctx, nil)
 	if audioErr != nil {
 		logger.Warnw("audio sensor error", "error", audioErr)
 	} else {
 		if v, ok := audioReadings["sound_detected"]; ok {
 			if b, ok := v.(bool); ok {
-				audioDetected = b
+				soundDetected = b
 			}
 		}
 	}
 
 	// Step 4: Fuse all three signals.
-	return fuseSignals(eyesDetected, eyeConfidence, motionConfidence, audioDetected), nil
+	return fuseSignals(eyesDetected, eyeConfidence, motionConfidence, soundDetected), eyesDetected, motionConfidence, soundDetected, nil
 }
 
 // fuseSignals combines eye, motion, and audio signals into an awake determination.
