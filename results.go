@@ -1,32 +1,25 @@
 package babymonitor
 
-import (
-	"image"
-	"sync"
+import "sync"
 
-	"go.viam.com/rdk/vision/classification"
-)
-
-// Results is a thread-safe cache of the latest frame and its classifications.
+// Results is a thread-safe cache of the latest awake/asleep determination.
 type Results struct {
-	mu              sync.Mutex
-	latestImg       image.Image
-	classifications classification.Classifications
+	mu      sync.Mutex
+	isAwake bool
 }
 
 func NewResults() *Results {
 	return &Results{}
 }
 
-func (r *Results) Store(img image.Image, cls classification.Classifications) {
+func (r *Results) Store(isAwake bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.latestImg = img
-	r.classifications = cls
+	r.isAwake = isAwake
 }
 
-func (r *Results) Load() (image.Image, classification.Classifications) {
+func (r *Results) Load() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.latestImg, r.classifications
+	return r.isAwake
 }

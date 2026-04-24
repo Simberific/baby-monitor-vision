@@ -5,7 +5,7 @@
   "description": "Baby monitor awake detection module",
   "models": [
     {
-      "api": "rdk:service:vision",
+      "api": "rdk:component:sensor",
       "model": "simone-kalmakis:baby-monitor:awake-classifier"
     },
     {
