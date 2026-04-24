@@ -51,38 +51,32 @@ func runPipeline(
 		}
 	}
 
-	// Step 3: Audio signal — expects a "sound_level" key in [0,1] from the sensor.
-	audioLevel := 0.0
+	// Step 3: Audio signal — expects a "sound_detected" bool key from the sensor.
+	audioDetected := false
 	audioReadings, audioErr := audioSensor.Readings(ctx, nil)
 	if audioErr != nil {
 		logger.Warnw("audio sensor error", "error", audioErr)
 	} else {
-		if v, ok := audioReadings["sound_level"]; ok {
-			if f, ok := v.(float64); ok {
-				audioLevel = f
+		if v, ok := audioReadings["sound_detected"]; ok {
+			if b, ok := v.(bool); ok {
+				audioDetected = b
 			}
 		}
 	}
 
 	// Step 4: Fuse all three signals.
-	return fuseSignals(eyesDetected, eyeConfidence, motionConfidence, audioLevel), nil
+	return fuseSignals(eyesDetected, eyeConfidence, motionConfidence, audioDetected), nil
 }
 
-// fuseSignals combines eye, motion, and audio signals into an awake confidence in [0,1].
-// Parameters:
-//   - eyesDetected:     whether any eyes were found above minEyeConf
-//   - eyeConfidence:    detection confidence of the best eye bounding box (0 if none)
-//   - motionConfidence: fraction of pixels that moved (from viam/motion-detector)
-//   - audioLevel:       normalised sound level in [0,1] (from audio-sensor)
-//
+// fuseSignals combines eye, motion, and audio signals into an awake determination.
 // Eyes and audio are hard awake signals — either alone is sufficient.
-// Motion is intentionally left as a weak signal pending real-world tuning.
-func fuseSignals(eyesDetected bool, eyeConfidence, motionConfidence, audioLevel float64) bool {
+// Motion alone triggers awake above a confidence threshold.
+func fuseSignals(eyesDetected bool, eyeConfidence, motionConfidence float64, audioDetected bool) bool {
 	if eyesDetected {
 		return true
 	}
-	if audioLevel > 0.2 {
+	if audioDetected {
 		return true
 	}
-	return motionConfidence+audioLevel > 0.2
+	return motionConfidence > 0.2
 }
